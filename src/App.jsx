@@ -65,6 +65,9 @@ export default function App() {
     controls.inertiaSpin = 0;
     controls.inertiaTranslate = 0;
     controls.inertiaZoom = 0;
+    // Cesium otherwise pushes the camera away from the globe near the surface.
+    // With this deliberately terrain-free study view that looks like autonomous zoom.
+    controls.enableCollisionDetection = false;
     viewer.camera.setView(FIXED_CAMERA);
 
     async function init() {
@@ -115,14 +118,22 @@ export default function App() {
     const viewer = viewerRef.current;
     if (!viewer) return;
     if (nextValue && !imageryRef.current) {
-      imageryRef.current = viewer.imageryLayers.addImageryProvider(new Cesium.WebMapServiceImageryProvider({
+      setStatus("Requesting USGS NAIP aerial imagery…");
+      const provider = new Cesium.WebMapServiceImageryProvider({
         url: "https://imagery.nationalmap.gov/arcgis/services/USGSNAIPImagery/ImageServer/WMSServer",
         layers: "USGSNAIPImagery",
         parameters: { service: "WMS", version: "1.3.0", format: "image/png", transparent: false },
         crs: "EPSG:3857",
-      }));
+      });
+      provider.errorEvent.addEventListener((error) => {
+        setStatus(`NAIP request failed: ${error.message || "remote imagery service error"}`);
+      });
+      imageryRef.current = viewer.imageryLayers.addImageryProvider(provider);
+      viewer.imageryLayers.raiseToTop(imageryRef.current);
+      setStatus("USGS NAIP aerial imagery enabled above the OSM base.");
     } else if (imageryRef.current) {
       imageryRef.current.show = nextValue;
+      setStatus(nextValue ? "USGS NAIP aerial imagery enabled above the OSM base." : "OSM base only.");
     }
     viewer.scene.requestRender();
   }
