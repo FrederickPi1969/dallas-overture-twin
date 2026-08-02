@@ -125,12 +125,14 @@ export default function App() {
         setStatus(`Loaded ${metadata.feature_counts.overture_buildings.toLocaleString()} Overture buildings with source provenance.`);
 
         try {
-          const naip = await Cesium.ArcGisMapServerImageryProvider.fromUrl(
-            "https://imagery.nationalmap.gov/arcgis/rest/services/USGSNAIPImagery/ImageServer",
-          );
+          const naip = new Cesium.WebMapServiceImageryProvider({
+            url: "https://imagery.nationalmap.gov/arcgis/services/USGSNAIPImagery/ImageServer/WMSServer",
+            layers: "USGSNAIPImagery",
+            parameters: { service: "WMS", version: "1.3.0", format: "image/png", transparent: false },
+            crs: "EPSG:3857",
+          });
           if (!disposed) {
-            // Replace the temporary OSM base with downloadable, analysis-permitted US public imagery.
-            viewer.imageryLayers.removeAll(true);
+            // Keep OSM under the WMS layer so a transient public-imagery failure cannot leave a blank globe.
             viewer.imageryLayers.addImageryProvider(naip);
           }
         } catch (error) {
