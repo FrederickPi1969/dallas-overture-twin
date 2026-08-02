@@ -29,11 +29,11 @@ function property(entity, name) {
 export default function App() {
   const containerRef = useRef(null);
   const layersRef = useRef({});
-  const terrainRef = useRef(null);
+  const imageryRef = useRef(null);
   const viewerRef = useRef(null);
   const [counts, setCounts] = useState(null);
   const [status, setStatus] = useState("Loading local data snapshot…");
-  const [visible, setVisible] = useState({ overture: true, osmBuildings: true, osmStreets: true, amenities: false, terrain: true });
+  const [visible, setVisible] = useState({ overture: true, osmBuildings: false, osmStreets: false, amenities: false, naip: false });
 
   useEffect(() => {
     let disposed = false;
@@ -48,15 +48,23 @@ export default function App() {
       fullscreenButton: false,
       infoBox: true,
       selectionIndicator: true,
+      requestRenderMode: true,
+      maximumRenderTimeChange: Infinity,
       baseLayer: new Cesium.ImageryLayer(new Cesium.OpenStreetMapImageryProvider({ url: "https://tile.openstreetmap.org/" })),
     });
     viewerRef.current = viewer;
-    viewer.scene.globe.enableLighting = true;
-    viewer.scene.highDynamicRange = true;
-    viewer.camera.flyTo({
+    const controls = viewer.scene.screenSpaceCameraController;
+    controls.enableRotate = false;
+    controls.enableTranslate = false;
+    controls.enableZoom = false;
+    controls.enableTilt = false;
+    controls.enableLook = false;
+    controls.inertiaSpin = 0;
+    controls.inertiaTranslate = 0;
+    controls.inertiaZoom = 0;
+    viewer.camera.setView({
       destination: Cesium.Cartesian3.fromDegrees(-96.8005, 32.7798, 1900),
       orientation: { heading: Cesium.Math.toRadians(-12), pitch: Cesium.Math.toRadians(-49), roll: 0 },
-      duration: 0,
     });
 
     async function init() {
@@ -71,6 +79,10 @@ export default function App() {
         if (disposed) return;
         [overture, osmBuildings, osmStreets, amenities].forEach((layer) => viewer.dataSources.add(layer));
         layersRef.current = { overture, osmBuildings, osmStreets, amenities };
+        overture.show = true;
+        osmBuildings.show = false;
+        osmStreets.show = false;
+        amenities.show = false;
 
         overture.entities.values.forEach((entity) => {
           if (!entity.polygon) return;
@@ -115,7 +127,7 @@ export default function App() {
           const major = ["primary", "secondary", "tertiary"].includes(kind);
           entity.polyline.material = (major ? Cesium.Color.fromCssColorString("#f4cc70") : Cesium.Color.fromCssColorString("#d7e1e8")).withAlpha(major ? 0.92 : 0.46);
           entity.polyline.width = major ? 2.5 : 1.0;
-          entity.polyline.clampToGround = true;
+          entity.polyline.clampToGround = false;
         });
         amenities.entities.values.forEach((entity) => {
           entity.point = new Cesium.PointGraphics({ pixelSize: 6, color: Cesium.Color.fromCssColorString("#ff6b9d"), outlineColor: Cesium.Color.WHITE, outlineWidth: 1 });
@@ -132,21 +144,14 @@ export default function App() {
             crs: "EPSG:3857",
           });
           if (!disposed) {
-            // Keep OSM under the WMS layer so a transient public-imagery failure cannot leave a blank globe.
-            viewer.imageryLayers.addImageryProvider(naip);
+            // Opt-in: WMS imagery can be substantially heavier than the stable OSM base layer.
+            imageryRef.current = viewer.imageryLayers.addImageryProvider(naip);
+            imageryRef.current.show = false;
           }
         } catch (error) {
-          if (!disposed) setStatus((previous) => `${previous} NAIP imagery unavailable; using OSM fallback.`);
+          if (!disposed) setStatus((previous) => `${previous} NAIP overlay unavailable; using OSM base.`);
         }
-
-        try {
-          terrainRef.current = await Cesium.ArcGISTiledElevationTerrainProvider.fromUrl(
-            "https://elevation3d.arcgis.com/arcgis/rest/services/WorldElevation3D/Terrain3D/ImageServer",
-          );
-          if (!disposed) viewer.terrainProvider = terrainRef.current;
-        } catch (error) {
-          if (!disposed) setStatus((previous) => `${previous} Public terrain unavailable: ${error.message}`);
-        }
+        viewer.scene.requestRender();
       } catch (error) {
         if (!disposed) setStatus(`Load failed: ${error.message}`);
       }
@@ -157,12 +162,12 @@ export default function App() {
 
   function changeLayer(name, nextValue) {
     setVisible((current) => ({ ...current, [name]: nextValue }));
-    if (name === "terrain") {
-      const viewer = viewerRef.current;
-      if (viewer) viewer.terrainProvider = nextValue && terrainRef.current ? terrainRef.current : new Cesium.EllipsoidTerrainProvider();
+    if (name === "naip") {
+      if (imageryRef.current) imageryRef.current.show = nextValue;
     } else if (layersRef.current[name]) {
       layersRef.current[name].show = nextValue;
     }
+    viewerRef.current?.scene.requestRender();
   }
 
   return (
@@ -170,7 +175,7 @@ export default function App() {
       <aside className="sidebar">
         <p className="eyebrow">REUSABLE PUBLIC-DATA PIPELINE</p>
         <h1>Dallas Building<br /><em>Provenance Twin</em></h1>
-        <p className="lede">不是某个城市政府的专属接口，而是 OSM 原始要素 × Overture Maps 融合建筑数据的可迁移样例。</p>
+        <p className="lede">固定镜头的 Downtown Dallas 约 1 × 1 km study area：OSM 原始要素 × Overture Maps 融合建筑数据。</p>
         <section className="metrics">
           <Metric label="Overture buildings" value={counts?.feature_counts.overture_buildings} />
           <Metric label="Raw OSM buildings" value={counts?.feature_counts.osm_buildings} />
@@ -182,10 +187,10 @@ export default function App() {
           <Toggle label="Raw OSM building outlines" checked={visible.osmBuildings} onChange={(v) => changeLayer("osmBuildings", v)} />
           <Toggle label="OSM street network" checked={visible.osmStreets} onChange={(v) => changeLayer("osmStreets", v)} />
           <Toggle label="OSM amenities" checked={visible.amenities} onChange={(v) => changeLayer("amenities", v)} />
-          <Toggle label="Public terrain" checked={visible.terrain} onChange={(v) => changeLayer("terrain", v)} />
+          <Toggle label="USGS NAIP aerial imagery (heavier)" checked={visible.naip} onChange={(v) => changeLayer("naip", v)} />
         </section>
         <section><h2>Imagery base</h2>
-          <p className="small">USGS NAIP public orthophoto (usually 60 cm-class in Texas where available). It is aerial imagery, intentionally chosen over Google imagery so the same source can support CV and data export workflows.</p>
+          <p className="small">Stable default: OSM base. Turn on USGS NAIP only when examining rooftops; it is public, high-resolution aerial imagery and is intentionally opt-in to keep the fixed scene responsive.</p>
         </section>
         <section><h2>Provenance legend</h2>
           <p className="legend"><i className="dot osm" /> OpenStreetMap in Overture</p>
