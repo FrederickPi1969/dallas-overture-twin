@@ -4,10 +4,12 @@ import * as Cesium from "cesium";
 const DATA_ROOT = `${import.meta.env.BASE_URL}data/`;
 const DATA = {
   overture: `${DATA_ROOT}overture_buildings.geojson`,
-  osmBuildings: `${DATA_ROOT}osm_buildings.geojson`,
-  osmStreets: `${DATA_ROOT}osm_streets.geojson`,
-  amenities: `${DATA_ROOT}osm_amenities.geojson`,
   metadata: `${DATA_ROOT}source_metadata.json`,
+};
+
+const FIXED_CAMERA = {
+  destination: Cesium.Cartesian3.fromDegrees(-96.8005, 32.7798, 1900),
+  orientation: { heading: Cesium.Math.toRadians(-12), pitch: Cesium.Math.toRadians(-49), roll: 0 },
 };
 
 const DATASET_COLORS = {
@@ -28,12 +30,11 @@ function property(entity, name) {
 
 export default function App() {
   const containerRef = useRef(null);
-  const layersRef = useRef({});
   const imageryRef = useRef(null);
   const viewerRef = useRef(null);
   const [counts, setCounts] = useState(null);
   const [status, setStatus] = useState("Loading local data snapshot…");
-  const [visible, setVisible] = useState({ overture: true, osmBuildings: false, osmStreets: false, amenities: false, naip: false });
+  const [visible, setVisible] = useState({ naip: false });
 
   useEffect(() => {
     let disposed = false;
@@ -54,35 +55,26 @@ export default function App() {
     });
     viewerRef.current = viewer;
     const controls = viewer.scene.screenSpaceCameraController;
-    controls.enableRotate = false;
-    controls.enableTranslate = false;
-    controls.enableZoom = false;
-    controls.enableTilt = false;
-    controls.enableLook = false;
+    // Preserve normal mouse/trackpad navigation, but eliminate all post-input drift.
+    controls.enableInputs = true;
+    controls.enableRotate = true;
+    controls.enableTranslate = true;
+    controls.enableZoom = true;
+    controls.enableTilt = true;
+    controls.enableLook = true;
     controls.inertiaSpin = 0;
     controls.inertiaTranslate = 0;
     controls.inertiaZoom = 0;
-    viewer.camera.setView({
-      destination: Cesium.Cartesian3.fromDegrees(-96.8005, 32.7798, 1900),
-      orientation: { heading: Cesium.Math.toRadians(-12), pitch: Cesium.Math.toRadians(-49), roll: 0 },
-    });
+    viewer.camera.setView(FIXED_CAMERA);
 
     async function init() {
       try {
-        const [metadata, overture, osmBuildings, osmStreets, amenities] = await Promise.all([
+        const [metadata, overture] = await Promise.all([
           fetch(DATA.metadata).then((response) => response.json()),
           Cesium.GeoJsonDataSource.load(DATA.overture),
-          Cesium.GeoJsonDataSource.load(DATA.osmBuildings),
-          Cesium.GeoJsonDataSource.load(DATA.osmStreets),
-          Cesium.GeoJsonDataSource.load(DATA.amenities),
         ]);
         if (disposed) return;
-        [overture, osmBuildings, osmStreets, amenities].forEach((layer) => viewer.dataSources.add(layer));
-        layersRef.current = { overture, osmBuildings, osmStreets, amenities };
-        overture.show = true;
-        osmBuildings.show = false;
-        osmStreets.show = false;
-        amenities.show = false;
+        viewer.dataSources.add(overture);
 
         overture.entities.values.forEach((entity) => {
           if (!entity.polygon) return;
@@ -104,70 +96,35 @@ export default function App() {
           </tbody></table>`;
         });
 
-        osmBuildings.entities.values.forEach((entity) => {
-          if (!entity.polygon) return;
-          const height = Number(property(entity, "render_height_m")) || 7.5;
-          entity.polygon.material = Cesium.Color.fromCssColorString("#1f78b4").withAlpha(0.12);
-          entity.polygon.outline = true;
-          entity.polygon.outlineColor = Cesium.Color.fromCssColorString("#78d4ff").withAlpha(0.95);
-          entity.polygon.extrudedHeight = height + 0.25;
-          entity.polygon.height = 0;
-          entity.name = `Raw OSM building · ${Math.round(height)} m`;
-          entity.description = `<table class="cesium-infoBox-defaultTable"><tbody>
-            <tr><th>Dataset</th><td>Raw OSM API snapshot</td></tr>
-            <tr><th>Height</th><td>${height} m</td></tr>
-            <tr><th>Height provenance</th><td>${property(entity, "height_source") || "unknown"}</td></tr>
-            <tr><th>OSM ID</th><td>${property(entity, "osm_id") || "unknown"}</td></tr>
-          </tbody></table>`;
-        });
-
-        osmStreets.entities.values.forEach((entity) => {
-          if (!entity.polyline) return;
-          const kind = property(entity, "highway");
-          const major = ["primary", "secondary", "tertiary"].includes(kind);
-          entity.polyline.material = (major ? Cesium.Color.fromCssColorString("#f4cc70") : Cesium.Color.fromCssColorString("#d7e1e8")).withAlpha(major ? 0.92 : 0.46);
-          entity.polyline.width = major ? 2.5 : 1.0;
-          entity.polyline.clampToGround = false;
-        });
-        amenities.entities.values.forEach((entity) => {
-          entity.point = new Cesium.PointGraphics({ pixelSize: 6, color: Cesium.Color.fromCssColorString("#ff6b9d"), outlineColor: Cesium.Color.WHITE, outlineWidth: 1 });
-          entity.name = `OSM amenity · ${property(entity, "amenity") || "unknown"}`;
-        });
         setCounts(metadata);
-        setStatus(`Loaded ${metadata.feature_counts.overture_buildings.toLocaleString()} Overture buildings with source provenance.`);
-
-        try {
-          const naip = new Cesium.WebMapServiceImageryProvider({
-            url: "https://imagery.nationalmap.gov/arcgis/services/USGSNAIPImagery/ImageServer/WMSServer",
-            layers: "USGSNAIPImagery",
-            parameters: { service: "WMS", version: "1.3.0", format: "image/png", transparent: false },
-            crs: "EPSG:3857",
-          });
-          if (!disposed) {
-            // Opt-in: WMS imagery can be substantially heavier than the stable OSM base layer.
-            imageryRef.current = viewer.imageryLayers.addImageryProvider(naip);
-            imageryRef.current.show = false;
-          }
-        } catch (error) {
-          if (!disposed) setStatus((previous) => `${previous} NAIP overlay unavailable; using OSM base.`);
-        }
+        setStatus(`Fixed camera · ${metadata.feature_counts.overture_buildings.toLocaleString()} Overture buildings · lightweight render mode.`);
         viewer.scene.requestRender();
       } catch (error) {
         if (!disposed) setStatus(`Load failed: ${error.message}`);
       }
     }
     init();
-    return () => { disposed = true; viewer.destroy(); };
+    return () => {
+      disposed = true;
+      viewer.destroy();
+    };
   }, []);
 
-  function changeLayer(name, nextValue) {
-    setVisible((current) => ({ ...current, [name]: nextValue }));
-    if (name === "naip") {
-      if (imageryRef.current) imageryRef.current.show = nextValue;
-    } else if (layersRef.current[name]) {
-      layersRef.current[name].show = nextValue;
+  function toggleNaip(nextValue) {
+    setVisible({ naip: nextValue });
+    const viewer = viewerRef.current;
+    if (!viewer) return;
+    if (nextValue && !imageryRef.current) {
+      imageryRef.current = viewer.imageryLayers.addImageryProvider(new Cesium.WebMapServiceImageryProvider({
+        url: "https://imagery.nationalmap.gov/arcgis/services/USGSNAIPImagery/ImageServer/WMSServer",
+        layers: "USGSNAIPImagery",
+        parameters: { service: "WMS", version: "1.3.0", format: "image/png", transparent: false },
+        crs: "EPSG:3857",
+      }));
+    } else if (imageryRef.current) {
+      imageryRef.current.show = nextValue;
     }
-    viewerRef.current?.scene.requestRender();
+    viewer.scene.requestRender();
   }
 
   return (
@@ -182,12 +139,9 @@ export default function App() {
           <Metric label="OSM streets" value={counts?.feature_counts.osm_streets} />
           <Metric label="OSM amenities" value={counts?.feature_counts.osm_amenities} />
         </section>
-        <section><h2>Layers</h2>
-          <Toggle label="Overture extruded buildings" checked={visible.overture} onChange={(v) => changeLayer("overture", v)} />
-          <Toggle label="Raw OSM building outlines" checked={visible.osmBuildings} onChange={(v) => changeLayer("osmBuildings", v)} />
-          <Toggle label="OSM street network" checked={visible.osmStreets} onChange={(v) => changeLayer("osmStreets", v)} />
-          <Toggle label="OSM amenities" checked={visible.amenities} onChange={(v) => changeLayer("amenities", v)} />
-          <Toggle label="USGS NAIP aerial imagery (heavier)" checked={visible.naip} onChange={(v) => changeLayer("naip", v)} />
+        <section><h2>View mode</h2>
+          <p className="small">Camera starts framed on the study area. Mouse and trackpad navigation remain enabled, but all Cesium inertial drift is set to zero. The OSM counts above are provenance metadata, not live scene entities.</p>
+          <Toggle label="USGS NAIP aerial imagery (on-demand)" checked={visible.naip} onChange={toggleNaip} />
         </section>
         <section><h2>Imagery base</h2>
           <p className="small">Stable default: OSM base. Turn on USGS NAIP only when examining rooftops; it is public, high-resolution aerial imagery and is intentionally opt-in to keep the fixed scene responsive.</p>
