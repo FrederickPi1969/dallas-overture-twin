@@ -1,0 +1,33 @@
+{
+  "generated_at_utc": "2026-08-02T07:12:18.544000+00:00",
+  "study_area_wgs84": {
+    "west": -96.806,
+    "south": 32.775,
+    "east": -96.795,
+    "north": 32.784
+  },
+  "feature_counts": {
+    "osm_buildings": 150,
+    "osm_streets": 1700,
+    "osm_amenities": 249,
+    "overture_buildings": 130
+  },
+  "sources": [
+    {
+      "name": "OpenStreetMap API map snapshot",
+      "url": "https://api.openstreetmap.org/api/0.6/map",
+      "license": "ODbL; attribute OpenStreetMap contributors"
+    },
+    {
+      "name": "Overture Maps Buildings",
+      "url": "https://docs.overturemaps.org/guides/buildings/",
+      "release": "2026-06-17.0",
+      "format": "GeoParquet queried remotely with DuckDB"
+    }
+  ],
+  "limitations": [
+    "This is a compact Downtown Dallas snapshot, not a citywide download.",
+    "Building height is used only when supplied by source data; otherwise a visibly labelled display heuristic is used.",
+    "Overture upstream provenance is a property, not an accuracy guarantee or surveyed geometry certification."
+  ]
+}

@@ -1,0 +1,4 @@
+node_modules/
+dist/
+.data-venv/
+.DS_Store
